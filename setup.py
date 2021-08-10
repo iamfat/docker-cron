@@ -6,7 +6,7 @@ from shutil import rmtree
 
 here = os.path.abspath(os.path.dirname(__file__))
 package = 'docker_cron'
-version = '0.4.0'
+version = '0.4.1'
 
 with codecs.open(os.path.join(here, 'README.md')) as f:
     long_description = '\n' + f.read()
@@ -24,7 +24,7 @@ if sys.argv[-1] == 'publish':
     except FileNotFoundError:
         pass
 
-    print_run('{0} setup.py sdist bdist_wheel'.format(sys.executable), True)
+    print_run('{0} setup.py sdist'.format(sys.executable), True)
     print_run('twine upload dist/*', True)
     print_run('git tag v{}'.format(version))
     print_run('git push --tags')

@@ -74,35 +74,39 @@ def main():
                 cmd = "sh -c '[ -d /etc/cron.d ] && find /etc/cron.d ! -name \".*\" -type f -exec cat \{\} \;'"
                 exit_code, output = container.exec_run(
                     cmd=cmd, stderr=False, tty=True)
+                if exit_code != 0:
+                    continue
+
                 tab = output.decode().replace('\t', ' ')
+                if tab == '':
+                    continue
+
+                cron_jobs = CronTab(tab=tab, user=False)
+                job_hashes = []
+                for job in cron_jobs:
+                    if not job.is_enabled():
+                        continue
+                    job_hash = hashsum(container.name + ': ' + str(job))
+                    if job_hash not in hashed_scheduled_jobs:
+                        slices = str(job.slices)
+                        if slices.startswith('@'):
+                            slices = SPECIALS[slices.lstrip('@')]
+                        scheduler.add_job(lambda c, cmd, _: c.exec_run(cmd=cmd, stderr=False, tty=True),
+                                          CronTrigger.from_crontab(slices),
+                                          args=[container,
+                                                job.command, job_hash],
+                                          name=job.command)
+                    else:
+                        del hashed_scheduled_jobs[job_hash]
             except:
                 continue
-
-            if tab == '':
-                continue
-
-            cron_jobs = CronTab(tab=tab, user=False)
-            job_hashes = []
-            for job in cron_jobs:
-                if not job.is_enabled():
-                    continue
-                job_hash = hashsum(container.name + ': ' + str(job))
-                if job_hash not in hashed_scheduled_jobs:
-                    slices = str(job.slices)
-                    if slices.startswith('@'):
-                        slices = SPECIALS[slices.lstrip('@')]
-                    scheduler.add_job(lambda c, cmd, _: c.exec_run(cmd=cmd, stderr=False, tty=True),
-                                      CronTrigger.from_crontab(slices),
-                                      args=[container, job.command, job_hash],
-                                      name=job.command)
-                else:
-                    del hashed_scheduled_jobs[job_hash]
 
         for job_hash, job in hashed_scheduled_jobs.items():
             # 未命中的
             scheduler.remove_job(job_id=job.id)
 
         time.sleep(10)
+
 
 if __name__ == "__main__":
     main()
