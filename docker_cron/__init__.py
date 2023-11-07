@@ -7,7 +7,6 @@ import time
 import docker
 import logging
 import hashlib
-import apscheduler
 
 from crontab import CronTab
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -35,7 +34,6 @@ def main():
 
     client = docker.DockerClient(
         base_url='unix://var/run/docker.sock', timeout=100)
-    events = client.events(decode=True)
 
     scheduler = BackgroundScheduler(
         executors={'default': ThreadPoolExecutor(40)}, timezone=TIMEZONE)
@@ -82,7 +80,6 @@ def main():
                     continue
 
                 cron_jobs = CronTab(tab=tab, user=False)
-                job_hashes = []
                 for job in cron_jobs:
                     if not job.is_enabled():
                         continue
@@ -95,7 +92,9 @@ def main():
                                           CronTrigger.from_crontab(slices),
                                           args=[container,
                                                 job.command, job_hash],
-                                          name=job.command)
+                                          id=job_hash,
+                                          name=job.command,
+                                          replace_existing=True)
                     else:
                         del hashed_scheduled_jobs[job_hash]
             except:
