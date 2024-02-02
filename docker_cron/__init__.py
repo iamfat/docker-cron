@@ -90,21 +90,37 @@ def main():
     except:
         pass
 
+    def get_scheduled_jobs(containers: list[Container]):
+        job_list: list[SchedulerJob] = scheduler.get_jobs()
+        job_dict: dict[str, SchedulerJob] = {}
+        for job in job_list:
+            # 若存储器中的任务所属容器当前不存在，则在存储请中删除此任务
+            container: Container = job.args[0]
+            # command = job.args[1]
+            hash = job.args[2]
+            if container not in containers:
+                scheduler.remove_job(job_id=job.id)
+            else:
+                job_dict[hash] = job
+        return job_dict
+
     def log_job_execution(event: JobExecutionEvent):
         job: SchedulerJob = scheduler.get_job(event.job_id)
         container: Container = job.args[0]
+        command: str = job.args[1]
         if event.exception:
-            logger.error("not executed %s container=[%s] exec=[%s] at=[%s] exception=[%s]", job.name,
-                         'EVENT_JOB_ERROR' if event.code is EVENT_JOB_ERROR else 'EVENT_JOB_MISSED', container.name,
-                         event.scheduled_run_time, event.exception)
+            logger.error("ERROR %s container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s] exception=[\033[31m%s\033[0m]",
+                         'JOB_ERROR' if event.code is EVENT_JOB_ERROR else 'JOB_MISSED',
+                         container.name, command, event.scheduled_run_time, event.exception)
         else:
-            logger.info("executed container=[%s] exec=[%s] at=[%s]", container.name, job.name,
+            logger.info("SUCCESS container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s]", container.name, job.name,
                         event.scheduled_run_time)
 
     def log_job_submission(event: JobSubmissionEvent):
         job: SchedulerJob = scheduler.get_job(event.job_id)
         container: Container = job.args[0]
-        logger.info("submitted container=[%s] exec=[%s] at=[%s]", container.name, job.name,
+        command: str = job.args[1]
+        logger.info("BEGIN container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s]", container.name, command,
                     '/'.join(map(str, event.scheduled_run_times)))
 
     scheduler.add_listener(log_job_execution, EVENT_JOB_ERROR |
@@ -116,21 +132,11 @@ def main():
 
         # 反复查询正在运行中的容器的cron.d目录，调整job列表
         try:
-            containers = client.containers.list()
+            containers: list[Container] = client.containers.list()
         except:
             continue
 
-        scheduled_jobs: list[SchedulerJob] = scheduler.get_jobs()
-        hashed_scheduled_jobs: dict[str, SchedulerJob] = {}
-        for job in scheduled_jobs:
-            # 若存储器中的任务所属容器当前不存在，则在存储请中删除此任务
-            job_container = job.args[0]
-            # job_command = job.args[1]
-            job_hash = job.args[2]
-            if job_container not in containers:
-                scheduler.remove_job(job_id=job.id)
-            else:
-                hashed_scheduled_jobs[job_hash] = job
+        scheduled_jobs = get_scheduled_jobs(containers)
 
         def crontab_exec(container: Container, cmd: str, _: str):
             _, output = container.exec_run(cmd, tty=True, stream=True)
@@ -146,7 +152,7 @@ def main():
                 if not it.is_enabled():
                     continue
                 job_hash = hashsum(container.name + ': ' + str(it))
-                if job_hash not in hashed_scheduled_jobs:
+                if job_hash not in scheduled_jobs:
                     slices = str(it.slices)
                     if slices.startswith('@'):
                         slices = SPECIALS[slices.lstrip('@')]
@@ -157,12 +163,11 @@ def main():
                                             id=job_hash,
                                             name=it.command,
                                             replace_existing=True)
-                    logger.debug('found %s.', job.name)
+                    logger.info(
+                        'ADD container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m]', container.name, it.command)
                     added += 1
                 else:
-                    del hashed_scheduled_jobs[job_hash]
-            if added > 0:
-                logger.info('%d jobs added.', added)
+                    del scheduled_jobs[job_hash]
             return added
 
         for container in containers:
@@ -180,13 +185,13 @@ def main():
             except:
                 continue
 
-        removing = len(hashed_scheduled_jobs)
+        removing = len(scheduled_jobs)
         if removing > 0:
-            for job_hash, job in hashed_scheduled_jobs.items():
+            for job_hash, job in scheduled_jobs.items():
                 # 未命中的
                 scheduler.remove_job(job_id=job.id)
-                logger.debug('removed %s.', job.name)
-            logger.info('%d jobs removed.', removing)
+                container: Container = job.args[0]
+                logger.info('REMOVE container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m]', container.name, job.name)
 
         time.sleep(10)
 
