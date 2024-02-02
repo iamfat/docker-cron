@@ -38,7 +38,7 @@ def get_current_user(container: Container) -> str:
     exit_code, output = container.exec_run(
         cmd="whoami", stderr=False, tty=True)
     if exit_code == 0:
-        return output.decode('utf8').replace('\n', '')
+        return output.decode().replace('\n', '').strip()
     return 'root'
 
 
@@ -48,7 +48,7 @@ def get_user_crontab(container: Container, user: str) -> CronTab:
     if exit_code != 0:
         return None
 
-    tab = output.decode('utf8').replace('\t', ' ')
+    tab = output.decode().replace('\t', ' ')
     if tab == '':
         return None
 
@@ -80,7 +80,7 @@ def main():
             'processpool': ProcessPoolExecutor(max_workers=5)
         }, timezone=TIMEZONE)
 
-    logging.basicConfig(stream=sys.stdout)
+    logging.basicConfig(stream=sys.stdout, format='%(levelname)s: %(message)s')
     logging.getLogger('apscheduler').setLevel(logging.ERROR)
     logger = logging.getLogger('docker-cron')
     logger.setLevel(logging.INFO)
@@ -138,17 +138,20 @@ def main():
 
         scheduled_jobs = get_scheduled_jobs(containers)
 
-        def crontab_exec(container: Container, cmd: str, _: str):
-            _, output = container.exec_run(cmd, tty=True, stream=True)
+        def exec_container_command(container: Container, cmd: str, _: str):
+            _, output = container.exec_run(
+                cmd, tty=True, stream=True)
             for chunk in output:
                 for line in chunk.decode().split('\n'):
                     print("\033[90m{cmd} : \033[0m {line}".format(
                         cmd=cmd, line=line))
             return 0
 
-        def crontab_to_schedule(container: Container, crontab: CronTab):
+        def crontab_to_schedule(container: Container, crontab: CronTab, user: str | bool = False):
             added = 0
             for it in crontab:
+                if user and it.user != user:
+                    continue
                 if not it.is_enabled():
                     continue
                 job_hash = hashsum(container.name + ': ' + str(it))
@@ -156,13 +159,13 @@ def main():
                     slices = str(it.slices)
                     if slices.startswith('@'):
                         slices = SPECIALS[slices.lstrip('@')]
-                    job = scheduler.add_job(crontab_exec,
-                                            CronTrigger.from_crontab(slices),
-                                            args=[container,
-                                                  it.command, job_hash],
-                                            id=job_hash,
-                                            name=it.command,
-                                            replace_existing=True)
+                    scheduler.add_job(exec_container_command,
+                                      CronTrigger.from_crontab(slices),
+                                      args=[container,
+                                            it.command, job_hash],
+                                      id=job_hash,
+                                      name=it.command,
+                                      replace_existing=True)
                     logger.info(
                         'ADD container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m]', container.name, it.command)
                     added += 1
@@ -179,19 +182,19 @@ def main():
 
                 system_crontab = get_system_crontab(container)
                 if system_crontab:
-                    crontab_to_schedule(container, filter(
-                        lambda it: it.user == user, system_crontab))
+                    crontab_to_schedule(container, system_crontab, user)
 
             except:
                 continue
 
         removing = len(scheduled_jobs)
         if removing > 0:
-            for job_hash, job in scheduled_jobs.items():
+            for job in scheduled_jobs.values():
                 # 未命中的
                 scheduler.remove_job(job_id=job.id)
                 container: Container = job.args[0]
-                logger.info('REMOVE container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m]', container.name, job.name)
+                logger.info(
+                    'REMOVE container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m]', container.name, job.name)
 
         time.sleep(10)
 
