@@ -92,17 +92,19 @@ def main():
 
     def log_job_execution(event: JobExecutionEvent):
         job: SchedulerJob = scheduler.get_job(event.job_id)
+        container: Container = job.args[0]
         if event.exception:
-            logger.error("not executed %s name=[%s] at=[%s] exception=[%s]", job.name,
-                         'EVENT_JOB_ERROR' if event.code is EVENT_JOB_ERROR else 'EVENT_JOB_MISSED',
+            logger.error("not executed %s container=[%s] exec=[%s] at=[%s] exception=[%s]", job.name,
+                         'EVENT_JOB_ERROR' if event.code is EVENT_JOB_ERROR else 'EVENT_JOB_MISSED', container.name,
                          event.scheduled_run_time, event.exception)
         else:
-            logger.info("executed name=[%s] at=[%s]", job.name,
+            logger.info("executed container=[%s] exec=[%s] at=[%s]", container.name, job.name,
                         event.scheduled_run_time)
 
     def log_job_submission(event: JobSubmissionEvent):
         job: SchedulerJob = scheduler.get_job(event.job_id)
-        logger.info("submitted name=[%s] at=[%s]", job.name,
+        container: Container = job.args[0]
+        logger.info("submitted container=[%s] exec=[%s] at=[%s]", container.name, job.name,
                     '/'.join(map(str, event.scheduled_run_times)))
 
     scheduler.add_listener(log_job_execution, EVENT_JOB_ERROR |
@@ -134,7 +136,8 @@ def main():
             _, output = container.exec_run(cmd, tty=True, stream=True)
             for chunk in output:
                 for line in chunk.decode().split('\n'):
-                    print("\033[90m{cmd} : \033[0m {line}".format(cmd=cmd, line=line))
+                    print("\033[90m{cmd} : \033[0m {line}".format(
+                        cmd=cmd, line=line))
             return 0
 
         def crontab_to_schedule(container: Container, crontab: CronTab):

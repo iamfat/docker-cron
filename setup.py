@@ -6,7 +6,7 @@ from shutil import rmtree
 
 here = os.path.abspath(os.path.dirname(__file__))
 package = 'docker_cron'
-version = '0.5.0'
+version = '0.5.1'
 
 with codecs.open(os.path.join(here, 'README.md')) as f:
     long_description = '\n' + f.read()
