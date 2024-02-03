@@ -109,8 +109,8 @@ def main():
         container: Container = job.args[0]
         command: str = job.args[1]
         if event.exception:
-            logger.error("ERROR %s container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s] exception=[\033[31m%s\033[0m]",
-                         'JOB_ERROR' if event.code is EVENT_JOB_ERROR else 'JOB_MISSED',
+            logger.error("%s container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s] exception=[\033[31m%s\033[0m]",
+                         'ERROR' if event.code is EVENT_JOB_ERROR else 'MISSED',
                          container.name, command, event.scheduled_run_time, event.exception)
         else:
             logger.info("SUCCESS container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s]", container.name, job.name,
@@ -120,7 +120,7 @@ def main():
         job: SchedulerJob = scheduler.get_job(event.job_id)
         container: Container = job.args[0]
         command: str = job.args[1]
-        logger.info("BEGIN container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s]", container.name, command,
+        logger.info("SUBMIT container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m] at=[%s]", container.name, command,
                     '/'.join(map(str, event.scheduled_run_times)))
 
     scheduler.add_listener(log_job_execution, EVENT_JOB_ERROR |
@@ -139,13 +139,22 @@ def main():
         scheduled_jobs = get_scheduled_jobs(containers)
 
         def exec_container_command(container: Container, cmd: str, _: str):
-            _, output = container.exec_run(
-                cmd, tty=True, stream=True)
-            for chunk in output:
-                for line in chunk.decode().split('\n'):
-                    print("\033[90m{cmd} : \033[0m {line}".format(
-                        cmd=cmd, line=line))
-            return 0
+            container.exec_run(cmd, tty=True, detach=True)
+            # resp = client.api.exec_create(
+            #     container.id, cmd, stdout=True, stderr=False, stdin=False, tty=True,
+            #     privileged=False, user='', environment=None,
+            #     workdir=None,
+            # )
+            # exec_output = client.api.exec_start(
+            #     resp['Id'], detach=False, tty=True, stream=False, socket=False,
+            #     demux=False
+            # )
+            # _, output = container.exec_run(
+            #     cmd, tty=True, stream=True)
+            # for chunk in output:
+            #     for line in chunk.decode().split('\n'):
+            #         print("\033[90m{cmd} : \033[0m {line}".format(
+            #             cmd=cmd, line=line))
 
         def crontab_to_schedule(container: Container, crontab: CronTab, user: str | bool = False):
             added = 0
@@ -164,8 +173,7 @@ def main():
                                       args=[container,
                                             it.command, job_hash],
                                       id=job_hash,
-                                      name=it.command,
-                                      replace_existing=True)
+                                      name=it.command)
                     logger.info(
                         'ADD container=[\033[32m%s\033[0m] command=[\033[33m%s\033[0m]', container.name, it.command)
                     added += 1
